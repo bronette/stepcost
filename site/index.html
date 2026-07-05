@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>StepCost — FinOps for LLM agents</title>
+  <meta name="description" content="Unit economics for LLM agent runs. See what every agent step costs — priced graph, rollups, waste flags. OSS Python SDK." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --surface: #121820;
+      --border: #243041;
+      --text: #e8eef6;
+      --muted: #8fa3bc;
+      --accent: #3dd68c;
+      --accent-dim: #1a9d5c;
+      --warn: #f5a623;
+      --code-bg: #070a0f;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 1.25rem; }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 1rem 0;
+      position: sticky; top: 0; background: rgba(11,15,20,.92); backdrop-filter: blur(8px); z-index: 10;
+    }
+    .nav { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    .logo { font-weight: 700; font-size: 1.15rem; letter-spacing: -.02em; }
+    .logo span { color: var(--accent); }
+    .nav-links { display: flex; gap: 1.25rem; font-size: .95rem; }
+    .nav-links a { color: var(--muted); }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .hero { padding: 4rem 0 3rem; }
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      line-height: 1.15;
+      letter-spacing: -.03em;
+      max-width: 18ch;
+      margin-bottom: 1rem;
+    }
+    .hero p.lead { color: var(--muted); font-size: 1.15rem; max-width: 52ch; margin-bottom: 2rem; }
+    .cta-row { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 2.5rem; }
+    .btn {
+      display: inline-flex; align-items: center; gap: .4rem;
+      padding: .65rem 1.1rem; border-radius: 8px; font-weight: 600; font-size: .95rem;
+      border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--accent); color: #04140a; }
+    .btn-primary:hover { background: var(--accent-dim); text-decoration: none; }
+    .btn-ghost { border-color: var(--border); color: var(--text); }
+    .btn-ghost:hover { border-color: var(--muted); text-decoration: none; }
+    .terminal {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 24px 64px rgba(0,0,0,.45);
+    }
+    .terminal-bar {
+      display: flex; gap: .45rem; padding: .75rem 1rem;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+    }
+    .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot-r { background: #ff5f57; } .dot-y { background: #febc2e; } .dot-g { background: #28c840; }
+    pre {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: .78rem; line-height: 1.55; padding: 1.25rem;
+      overflow-x: auto; color: #c9d6e5;
+    }
+    .cmd { color: var(--accent); }
+    .out { color: #9eb4cc; }
+    .hi { color: var(--warn); }
+    section { padding: 3.5rem 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 1.5rem; margin-bottom: 1.25rem; letter-spacing: -.02em; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1.25rem;
+    }
+    .card h3 { font-size: 1rem; margin-bottom: .5rem; }
+    .card p { color: var(--muted); font-size: .92rem; }
+    .compare { width: 100%; border-collapse: collapse; font-size: .92rem; }
+    .compare th, .compare td { text-align: left; padding: .65rem .75rem; border-bottom: 1px solid var(--border); }
+    .compare th { color: var(--muted); font-weight: 500; }
+    .pill {
+      display: inline-block; font-size: .75rem; font-weight: 600;
+      padding: .2rem .55rem; border-radius: 999px;
+      background: rgba(61,214,140,.12); color: var(--accent);
+    }
+    footer { padding: 2.5rem 0 3rem; color: var(--muted); font-size: .88rem; border-top: 1px solid var(--border); }
+    .partner-box {
+      margin-top: 2rem; padding: 1.5rem;
+      background: linear-gradient(135deg, rgba(61,214,140,.08), rgba(36,48,65,.4));
+      border: 1px solid var(--border); border-radius: 12px;
+    }
+    .partner-box p { color: var(--muted); margin: .5rem 0 1rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap nav">
+      <div class="logo">Step<span>Cost</span></div>
+      <nav class="nav-links">
+        <a href="#how">How it works</a>
+        <a href="#edge">Why us</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://github.com/bronette/stepcost">GitHub</a>
+        <a href="#partner">Partners</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <p class="pill">OSS · Python · works offline</p>
+      <h1>See what every agent step costs.</h1>
+      <p class="lead">
+        StepCost is FinOps for LLM agents — a priced economics graph per run,
+        not another flat trace viewer. Unit economics by step, feature, and customer.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/bronette/stepcost">View on GitHub →</a>
+        <a class="btn btn-ghost" href="#install">Install</a>
+      </div>
+
+      <div class="terminal" id="demo">
+        <div class="terminal-bar"><span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span></div>
+        <pre><span class="cmd">$ pip install stepcost</span>
+<span class="cmd">$ python examples/quickstart.py</span>
+<span class="out">trace total: $0.0152
+by step:     {'plan': 0.000288, 'retrieve': 0.00016, 'execute': 0.01475}</span>
+
+<span class="cmd">$ stepcost report ~/.stepcost/quickstart.db</span>
+<span class="out">StepCost report — quickstart.db
+Total: $0.0152  across 1 traces / 7 spans
+
+By feature:
+  support-bot                  $0.0152
+
+By customer:
+  acme                         $0.0152
+
+By kind:
+  llm_generation               $0.0150
+  embedding                    $0.0002
+
+Top traces:
+  47b3783e-22d                 $0.0152
+
+Waste signals:
+  (no waste flags)</span>
+
+<span class="cmd">$ stepcost report ~/.stepcost/quickstart.db --trace 47b3783e</span>
+<span class="out">trace support-bot                           12,480 tok  <span class="hi">$0.0152</span>
+├─ agent_step: plan                            1,380 tok  $0.0003
+│  └─ llm gpt-4o-mini                          1,380 tok  $0.0003
+├─ agent_step: retrieve                        8,000 tok  $0.0002
+│  └─ embedding text-embedding-3-small         8,000 tok  $0.0002
+└─ agent_step: execute                         4,100 tok  <span class="hi">$0.0148</span>
+   └─ llm gpt-4o                               4,100 tok  $0.0148</span></pre>
+      </div>
+    </section>
+
+    <section id="how">
+      <h2>How it works</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>1. Instrument</h3>
+          <p>Wrap agent steps and LLM calls. <code>call.record(response)</code> extracts invoice-safe tokens from OpenAI &amp; Anthropic.</p>
+        </div>
+        <div class="card">
+          <h3>2. Attribute</h3>
+          <p>First-class <code>customer_id</code>, <code>feature_id</code>, and agent-step graph — not loose metadata tags.</p>
+        </div>
+        <div class="card">
+          <h3>3. Report</h3>
+          <p><code>stepcost report</code> renders the cost tree, rollups, and waste heuristics. Stays local in SQLite.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="edge">
+      <h2>Why StepCost</h2>
+      <table class="compare">
+        <thead><tr><th></th><th>StepCost</th><th>Langfuse / Helicone</th></tr></thead>
+        <tbody>
+          <tr><td>Agent step economics</td><td>Typed cost graph</td><td>Flat traces + metadata</td></tr>
+          <tr><td>Finance ledger</td><td>Versioned price table</td><td>Dashboard estimates</td></tr>
+          <tr><td>Billing accuracy</td><td>Cache read vs 5m/1h write, reasoning, Responses API</td><td>Often flat input × output math</td></tr>
+          <tr><td>Privacy</td><td>Metadata-only default</td><td>Often full prompt capture</td></tr>
+          <tr><td>Offline</td><td>SQLite, no cloud required</td><td>Usually SaaS-first</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="accuracy">
+      <h2>Invoice-grade by design</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>Priced like your provider prices it</h3>
+          <p>Cache reads at 0.1×, 5-minute cache writes at 1.25×, 1-hour writes at 2×,
+          reasoning tokens split from output — for OpenAI (Chat Completions,
+          Responses API, embeddings) and Anthropic. Gate: reconcile within 2% of
+          the real invoice.</p>
+        </div>
+        <div class="card">
+          <h3>Never a silent $0</h3>
+          <p>Unrecognized usage shapes raise instead of recording zero. Models
+          missing from the price table warn at runtime and show as
+          "unpriced spans" in every report.</p>
+        </div>
+        <div class="card">
+          <h3>Doesn't lose your data</h3>
+          <p>Spans persist at trace and process exit — no manual flush. Sink
+          failures re-queue instead of dropping. Concurrent async agents keep
+          correct parent/child cost attribution. &lt;5ms p99 emit overhead.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <div class="terminal">
+        <pre><span class="cmd">git clone git@github.com:bronette/stepcost.git
+cd stepcost/sdk/python
+pip install -e ".[dev]"
+python examples/quickstart.py
+stepcost report ~/.stepcost/quickstart.db</span></pre>
+      </div>
+      <p style="color:var(--muted);margin-top:1rem;font-size:.92rem;">
+        PyPI: <code>pip install stepcost</code> — coming soon. See
+        <a href="https://github.com/bronette/stepcost/blob/main/PUBLISHING.md">PUBLISHING.md</a>.
+      </p>
+    </section>
+
+    <section id="pricing">
+      <h2>Pricing</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>SDK — free forever</h3>
+          <p>MIT-licensed Python SDK, local SQLite sink, <code>stepcost report</code>
+          viewer, waste flags. Works fully offline. No account, no meter.</p>
+        </div>
+        <div class="card">
+          <h3>Hosted dashboard — early access</h3>
+          <p>Team dashboard, alerts, and PR cost comments are being built with
+          design partners, who get it free and set the price with us. Public
+          pricing lands after that — usage-tiered, never a percent-of-spend tax.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="partner">
+      <h2>Design partners</h2>
+      <div class="partner-box">
+        <h3>Shipping agents and burning API tokens?</h3>
+        <p>
+          We're looking for 3 teams to instrument one agent for 2 weeks — free.
+          You get per-step cost + waste flags; we get honest feedback on whether
+          this beats your existing observability bill.
+        </p>
+        <a class="btn btn-primary" href="mailto:kevin.brunette@gmail.com?subject=StepCost%20design%20partner">Email us →</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="wrap">
+    <p>StepCost · MIT · <a href="https://github.com/bronette/stepcost">github.com/bronette/stepcost</a></p>
+  </footer>
+</body>
+</html>

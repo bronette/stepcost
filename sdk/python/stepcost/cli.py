@@ -1,0 +1,232 @@
+"""`stepcost` CLI — render the agent-economics graph from a sink DB.
+
+Usage:
+    stepcost report <db>                 # cost summary + waste flags across all traces
+    stepcost report <db> --trace <id>    # the typed cost tree for one trace
+    stepcost report <db> --top 10        # top-N most expensive traces
+    stepcost report <db> --json          # machine-readable output
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sqlite3
+import sys
+from decimal import Decimal
+
+from stepcost import report as R
+from stepcost.waste import WasteSignal
+
+
+def _usd(value: Decimal | float) -> str:
+    return f"${float(value):,.4f}"
+
+
+def _fmt_rows(mapping: dict[str, Decimal], indent: str = "  ") -> list[str]:
+    if not mapping:
+        return [f"{indent}(none)"]
+    rows = sorted(mapping.items(), key=lambda kv: kv[1], reverse=True)
+    return [f"{indent}{k:<28} {_usd(v)}" for k, v in rows]
+
+
+def _node_label(span) -> str:
+    kind = span.kind.value
+    if kind == "trace":
+        return f"trace {span.name or ''}".rstrip()
+    if kind == "agent_step":
+        return f"agent_step: {span.name or '?'}"
+    if kind == "llm_generation":
+        return f"llm {span.model or span.name or '?'}"
+    return f"{kind} {span.name or ''}".rstrip()
+
+
+def _fmt_tokens(n: int) -> str:
+    return f"{n:,} tok" if n else "—"
+
+
+def _subtree_tokens(node: R.TreeNode) -> int:
+    own = node.span.usage.total_tokens if node.span.usage else 0
+    return own + sum(_subtree_tokens(c) for c in node.children)
+
+
+def _render_tree(node: R.TreeNode, lines: list[str], prefix: str = "", is_last: bool = True, root: bool = True) -> None:
+    toks = _fmt_tokens(_subtree_tokens(node))
+    if root:
+        lines.append(f"{_node_label(node.span):<44} {toks:>12}  {_usd(node.subtree_usd)}")
+        child_prefix = ""
+    else:
+        connector = "└─ " if is_last else "├─ "
+        label = f"{prefix}{connector}{_node_label(node.span)}"
+        lines.append(f"{label:<44} {toks:>12}  {_usd(node.subtree_usd)}")
+        child_prefix = prefix + ("   " if is_last else "│  ")
+    for i, child in enumerate(node.children):
+        _render_tree(child, lines, child_prefix, i == len(node.children) - 1, root=False)
+
+
+def _render_unpriced(unpriced: dict[str, int]) -> list[str]:
+    if not unpriced:
+        return []
+    lines = ["", "⚠ Unpriced spans (recorded $0 — total is an undercount):"]
+    for model, count in sorted(unpriced.items(), key=lambda kv: -kv[1]):
+        lines.append(f"  {model}: {count} span(s) with no price-table entry")
+    lines.append("  Fix: update price_table.json or register_custom_model().")
+    return lines
+
+
+def _render_waste(waste: list[WasteSignal]) -> list[str]:
+    if not waste:
+        return ["  (no waste flags)"]
+    out = []
+    for w in waste:
+        est = f" ~{_usd(w.est_usd)}" if w.est_usd else ""
+        out.append(f"  [{w.severity}] {w.code}{est} — {w.message}")
+    out.append("  (heuristic flags over observed traffic — verify before acting)")
+    return out
+
+
+def _cmd_report(args: argparse.Namespace) -> int:
+    spans = R.load_spans(args.db, trace_id=args.trace)
+    if not spans:
+        print("No spans found." + (f" (trace {args.trace})" if args.trace else ""))
+        return 1
+
+    if args.trace:
+        rep = R.build_trace_report(args.trace, spans, monthly_multiplier=args.multiplier)
+        if args.json:
+            print(json.dumps(_trace_json(rep), default=str, indent=2))
+            return 0
+        print(f"Trace {rep.trace_id}")
+        meta = " / ".join(
+            p for p in [
+                f"feature={rep.feature_id}" if rep.feature_id else "",
+                f"customer={rep.customer_id}" if rep.customer_id else "",
+            ] if p
+        )
+        print(f"{meta}   {_usd(rep.total_usd)}   ({rep.n_spans} spans)\n")
+        tree_lines: list[str] = []
+        for node in rep.roots:
+            _render_tree(node, tree_lines)
+        print("\n".join(tree_lines))
+        print("\nBy step:")
+        print("\n".join(_fmt_rows(rep.by_step)))
+        print("\nBy kind:")
+        print("\n".join(_fmt_rows(rep.by_kind)))
+        print("\nWaste signals:")
+        print("\n".join(_render_waste(rep.waste)))
+        for line in _render_unpriced(rep.unpriced):
+            print(line)
+        return 0
+
+    summary = R.build_summary(spans, top=args.top, monthly_multiplier=args.multiplier)
+    if args.json:
+        print(json.dumps(_summary_json(summary), default=str, indent=2))
+        return 0
+    print(f"StepCost report — {args.db}")
+    print(f"Total: {_usd(summary.total_usd)}  across {summary.n_traces} traces / {summary.n_spans} spans\n")
+    print("By feature:")
+    print("\n".join(_fmt_rows(summary.by_feature)))
+    print("\nBy customer:")
+    print("\n".join(_fmt_rows(summary.by_customer)))
+    print("\nBy kind:")
+    print("\n".join(_fmt_rows(summary.by_kind)))
+    print(f"\nTop {args.top} traces:")
+    if summary.top_traces:
+        for tid, usd in summary.top_traces:
+            print(f"  {tid[:12]:<14} {_usd(usd)}")
+    else:
+        print("  (none)")
+    print("\nWaste signals:")
+    print("\n".join(_render_waste(summary.waste)))
+    for line in _render_unpriced(summary.unpriced):
+        print(line)
+    return 0
+
+
+def _waste_json(waste: list[WasteSignal]) -> list[dict]:
+    return [
+        {"code": w.code, "severity": w.severity, "message": w.message,
+         "est_usd": w.est_usd, "span_ids": w.span_ids}
+        for w in waste
+    ]
+
+
+def _tree_json(node: R.TreeNode) -> dict:
+    span = node.span
+    return {
+        "span_id": span.span_id,
+        "kind": span.kind.value,
+        "name": span.name,
+        "model": span.model,
+        "total_tokens": span.usage.total_tokens if span.usage else 0,
+        "cost_usd": str(span.cost.total_usd),
+        "subtree_usd": str(node.subtree_usd),
+        "children": [_tree_json(c) for c in node.children],
+    }
+
+
+def _trace_json(rep: R.TraceReport) -> dict:
+    return {
+        "trace_id": rep.trace_id,
+        "total_usd": str(rep.total_usd),
+        "n_spans": rep.n_spans,
+        "feature_id": rep.feature_id,
+        "customer_id": rep.customer_id,
+        "tree": [_tree_json(r) for r in rep.roots],
+        "by_step": {k: str(v) for k, v in rep.by_step.items()},
+        "by_kind": {k: str(v) for k, v in rep.by_kind.items()},
+        "waste": _waste_json(rep.waste),
+        "unpriced": rep.unpriced,
+    }
+
+
+def _summary_json(s: R.Summary) -> dict:
+    return {
+        "total_usd": str(s.total_usd),
+        "n_traces": s.n_traces,
+        "n_spans": s.n_spans,
+        "by_feature": {k: str(v) for k, v in s.by_feature.items()},
+        "by_customer": {k: str(v) for k, v in s.by_customer.items()},
+        "by_kind": {k: str(v) for k, v in s.by_kind.items()},
+        "top_traces": [[tid, str(usd)] for tid, usd in s.top_traces],
+        "waste": _waste_json(s.waste),
+        "unpriced": s.unpriced,
+    }
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="stepcost", description="FinOps for LLM agents")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    rep = sub.add_parser("report", help="render cost report from a sink DB")
+    rep.add_argument("db", help="path or sqlite:/// URL to a StepCost SQLite sink")
+    rep.add_argument("--trace", help="render one trace's cost tree", default=None)
+    rep.add_argument("--top", type=int, default=5, help="top-N traces in the summary")
+    rep.add_argument(
+        "--multiplier", type=float, default=1.0,
+        help="scale waste $ estimates to project beyond observed traffic",
+    )
+    rep.add_argument("--json", action="store_true", help="machine-readable output")
+    rep.set_defaults(func=_cmd_report)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except sqlite3.DatabaseError as exc:
+        print(
+            f"error: not a readable StepCost database ({exc}). "
+            "Point `stepcost report` at a SQLite file written by SQLiteSink.",
+            file=sys.stderr,
+        )
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
