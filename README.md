@@ -76,6 +76,29 @@ a `tool_call` — parented by LangChain's own run tree, so parallel branches
 attribute correctly. LCEL plumbing (`RunnableSequence` etc.) is filtered out of
 the tree.
 
+## Two-sided ledger: reconcile against what your provider actually bills
+
+```bash
+export ANTHROPIC_ADMIN_KEY=sk-ant-admin01-...   # Console → Settings → Organization → Admin keys
+stepcost sync anthropic ~/.stepcost/my-app.db --days 7
+stepcost sync openai    ~/.stepcost/my-app.db --days 7   # OPENAI_ADMIN_KEY
+stepcost report ~/.stepcost/my-app.db
+```
+
+`sync` pulls the org Cost APIs (what the provider says it will bill, per day)
+into the same SQLite file, and the report gains a reconciliation section:
+
+```
+Provider reconciliation (SDK-observed vs provider-billed):
+  anthropic  2026-07-08   SDK $0.0190   billed $0.0190   drift 0.2%   coverage 100%
+  2% gate (worst day): 0.23% — PASS ✅
+```
+
+**Drift** audits StepCost's pricing against the invoice, continuously.
+**Coverage** catches what no SDK can see alone: spend from call sites you never
+instrumented. The provider knows *what you'll pay*; the SDK knows *which step,
+feature, and customer caused it* — each side audits the other's blind spot.
+
 ## Privacy
 
 **Metadata-only by default.** Spans capture token counts, model, and your

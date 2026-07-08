@@ -74,6 +74,23 @@ def _render_unpriced(unpriced: dict[str, int]) -> list[str]:
     return lines
 
 
+def _render_reconciliation(rows: list) -> list[str]:
+    if not rows:
+        return []
+    lines = ["", "Provider reconciliation (SDK-observed vs provider-billed):"]
+    for r in rows:
+        lines.append(
+            f"  {r.provider:<10} {r.day}   SDK {_usd(r.sdk_usd)}   "
+            f"billed {_usd(r.provider_usd)}   drift {r.drift_pct:.1f}%   "
+            f"coverage {r.coverage_pct:.0f}%"
+        )
+    worst = max(rows, key=lambda r: r.drift_pct)
+    gate = "PASS ✅" if worst.drift_pct <= 2.0 else "CHECK ⚠"
+    lines.append(f"  2% gate (worst day): {worst.drift_pct:.2f}% — {gate}")
+    lines.append("  coverage < 100% = spend the SDK never saw (uninstrumented call sites)")
+    return lines
+
+
 def _render_waste(waste: list[WasteSignal]) -> list[str]:
     if not waste:
         return ["  (no waste flags)"]
@@ -118,7 +135,12 @@ def _cmd_report(args: argparse.Namespace) -> int:
             print(line)
         return 0
 
-    summary = R.build_summary(spans, top=args.top, monthly_multiplier=args.multiplier)
+    from stepcost.sync import load_provider_costs
+
+    provider_costs = load_provider_costs(R.resolve_db_path(args.db))
+    summary = R.build_summary(
+        spans, top=args.top, monthly_multiplier=args.multiplier, provider_costs=provider_costs
+    )
     if args.json:
         print(json.dumps(_summary_json(summary), default=str, indent=2))
         return 0
@@ -138,6 +160,8 @@ def _cmd_report(args: argparse.Namespace) -> int:
         print("  (none)")
     print("\nWaste signals:")
     print("\n".join(_render_waste(summary.waste)))
+    for line in _render_reconciliation(summary.reconciliation):
+        print(line)
     for line in _render_unpriced(summary.unpriced):
         print(line)
     return 0
@@ -191,12 +215,68 @@ def _summary_json(s: R.Summary) -> dict:
         "top_traces": [[tid, str(usd)] for tid, usd in s.top_traces],
         "waste": _waste_json(s.waste),
         "unpriced": s.unpriced,
+        "reconciliation": [
+            {
+                "provider": r.provider,
+                "day": r.day,
+                "sdk_usd": str(r.sdk_usd),
+                "provider_usd": str(r.provider_usd),
+                "drift_pct": round(r.drift_pct, 3),
+                "coverage_pct": round(r.coverage_pct, 1),
+            }
+            for r in s.reconciliation
+        ],
     }
+
+
+def _cmd_sync(args: argparse.Namespace) -> int:
+    import os
+
+    from stepcost import sync as S
+
+    db_path = R.resolve_db_path(args.db)
+    a_start, a_end, o_start, o_end = S.default_window(args.days)
+
+    if args.provider == "anthropic":
+        key = os.environ.get("ANTHROPIC_ADMIN_KEY", "")
+        if not key.startswith("sk-ant-admin"):
+            print(
+                "error: set ANTHROPIC_ADMIN_KEY to an Admin API key (sk-ant-admin01-...).\n"
+                "Create one: Console → Settings → Organization → Admin keys. "
+                "A regular sk-ant-api key cannot read org cost reports.",
+                file=sys.stderr,
+            )
+            return 2
+        records = S.fetch_anthropic_costs(key, starting_at=a_start, ending_at=a_end)
+    else:
+        key = os.environ.get("OPENAI_ADMIN_KEY", "")
+        if not key:
+            print(
+                "error: set OPENAI_ADMIN_KEY to an org admin key "
+                "(platform.openai.com → Settings → Organization → Admin keys).",
+                file=sys.stderr,
+            )
+            return 2
+        records = S.fetch_openai_costs(key, start_time=o_start, end_time=o_end)
+
+    n = S.store_provider_costs(db_path, records)
+    total = sum((r.amount_usd for r in records), start=Decimal("0"))
+    print(f"synced {n} {args.provider} cost rows (last {args.days}d, ${total:.4f}) → {db_path}")
+    print("Run `stepcost report` to see the reconciliation section.")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="stepcost", description="FinOps for LLM agents")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sync_p = sub.add_parser(
+        "sync", help="pull provider-billed costs (org admin APIs) into the sink DB"
+    )
+    sync_p.add_argument("provider", choices=["anthropic", "openai"])
+    sync_p.add_argument("db", help="path or sqlite:/// URL to a StepCost SQLite sink")
+    sync_p.add_argument("--days", type=int, default=7, help="how many days back to pull")
+    sync_p.set_defaults(func=_cmd_sync)
 
     rep = sub.add_parser("report", help="render cost report from a sink DB")
     rep.add_argument("db", help="path or sqlite:/// URL to a StepCost SQLite sink")

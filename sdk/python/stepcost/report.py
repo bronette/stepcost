@@ -16,6 +16,7 @@ from pathlib import Path
 
 from stepcost.models import Span, SpanKind
 from stepcost.sinks.sqlite import sqlite_url_to_path
+from stepcost.sync import ProviderCost
 from stepcost.waste import WasteSignal, detect_waste
 
 _ZERO = Decimal("0")
@@ -193,6 +194,57 @@ def build_trace_report(
 
 
 @dataclass
+class ReconciliationRow:
+    """SDK-observed vs provider-billed dollars for one provider-day."""
+
+    provider: str
+    day: str  # YYYY-MM-DD UTC
+    sdk_usd: Decimal
+    provider_usd: Decimal
+
+    @property
+    def drift_pct(self) -> float:
+        if self.provider_usd == 0:
+            return 0.0
+        return float(abs(self.sdk_usd - self.provider_usd) / self.provider_usd * 100)
+
+    @property
+    def coverage_pct(self) -> float:
+        """How much of the provider's bill the SDK saw (uninstrumented spend gap)."""
+        if self.provider_usd == 0:
+            return 100.0
+        return float(self.sdk_usd / self.provider_usd * 100)
+
+
+def build_reconciliation(
+    spans: list[Span], provider_costs: list[ProviderCost]
+) -> list[ReconciliationRow]:
+    """One row per provider-day the provider reported costs for.
+
+    The provider ledger is treated as ground truth; the SDK side is what got
+    instrumented. drift ≈ pricing accuracy; coverage < 100% ≈ spend the SDK
+    never saw (uninstrumented call sites).
+    """
+    billed: dict[tuple[str, str], Decimal] = {}
+    for pc in provider_costs:
+        key = (pc.provider, pc.day)
+        billed[key] = billed.get(key, _ZERO) + pc.amount_usd
+
+    observed: dict[tuple[str, str], Decimal] = {}
+    for s in spans:
+        if s.kind == SpanKind.TRACE or s.provider is None or s.cost.total_usd == _ZERO:
+            continue
+        key = (s.provider.value, s.started_at.strftime("%Y-%m-%d"))
+        observed[key] = observed.get(key, _ZERO) + s.cost.total_usd
+
+    return [
+        ReconciliationRow(provider=p, day=d, sdk_usd=observed.get((p, d), _ZERO), provider_usd=usd)
+        for (p, d), usd in sorted(billed.items())
+        if usd > 0
+    ]
+
+
+@dataclass
 class Summary:
     total_usd: Decimal
     n_traces: int
@@ -203,10 +255,15 @@ class Summary:
     top_traces: list[tuple[str, Decimal]]
     waste: list[WasteSignal]
     unpriced: dict[str, int] = field(default_factory=dict)
+    reconciliation: list[ReconciliationRow] = field(default_factory=list)
 
 
 def build_summary(
-    spans: list[Span], *, top: int = 5, monthly_multiplier: float = 1.0
+    spans: list[Span],
+    *,
+    top: int = 5,
+    monthly_multiplier: float = 1.0,
+    provider_costs: list[ProviderCost] | None = None,
 ) -> Summary:
     grouped = group_by_trace(spans)
     top_traces = sorted(
@@ -224,4 +281,5 @@ def build_summary(
         top_traces=top_traces,
         waste=detect_waste(spans, monthly_multiplier=monthly_multiplier),
         unpriced=unpriced_models(spans),
+        reconciliation=build_reconciliation(spans, provider_costs or []),
     )
