@@ -16,3 +16,4 @@ venv/
 cpanel-*
 *.eml
 uv.lock
+.env
