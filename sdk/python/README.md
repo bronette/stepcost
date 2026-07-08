@@ -6,7 +6,7 @@ FinOps for LLM agents — a typed, priced cost graph for every agent step. See
 ## Install
 
 ```bash
-pip install -e .            # runtime only
+pip install stepcost        # from PyPI (or: pip install -e . from a clone)
 pip install -e ".[dev]"     # + pytest, ruff
 ```
 

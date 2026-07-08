@@ -21,11 +21,13 @@ and models missing from the price table are flagged loudly in every report.
 ## Quick start (5 minutes, $0, no API key)
 
 ```bash
-cd sdk/python
-pip install -e .
-python examples/quickstart.py                 # instruments a tiny agent, writes a cost graph
+pip install stepcost
+curl -sO https://raw.githubusercontent.com/bronette/stepcost/main/sdk/python/examples/quickstart.py
+python quickstart.py                          # instruments a tiny agent, writes a cost graph
 stepcost report ~/.stepcost/quickstart.db     # render the per-step cost tree
 ```
+
+(From a clone: `cd sdk/python && pip install -e . && python examples/quickstart.py`)
 
 That runs a 3-step agent with simulated token usage — no API calls, no spend —
 and renders a priced cost tree with by-step / by-customer rollups and waste flags.

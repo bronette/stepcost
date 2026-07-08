@@ -232,15 +232,15 @@ Waste signals:
     <section id="install">
       <h2>Install</h2>
       <div class="terminal">
-        <pre><span class="cmd">git clone git@github.com:bronette/stepcost.git
-cd stepcost/sdk/python
-pip install -e ".[dev]"
-python examples/quickstart.py
-stepcost report ~/.stepcost/quickstart.db</span></pre>
+        <pre><span class="cmd">pip install stepcost</span>            <span class="out"># or: pip install "stepcost[langchain]"</span>
+<span class="cmd">curl -sO https://raw.githubusercontent.com/bronette/stepcost/main/sdk/python/examples/quickstart.py</span>
+<span class="cmd">python quickstart.py</span>            <span class="out"># $0, no API key</span>
+<span class="cmd">stepcost report ~/.stepcost/quickstart.db</span></pre>
       </div>
       <p style="color:var(--muted);margin-top:1rem;font-size:.92rem;">
-        PyPI: <code>pip install stepcost</code> — coming soon. See
-        <a href="https://github.com/bronette/stepcost/blob/main/PUBLISHING.md">PUBLISHING.md</a>.
+        On <a href="https://pypi.org/project/stepcost/">PyPI</a> ·
+        source on <a href="https://github.com/bronette/stepcost">GitHub</a> ·
+        LangChain/LangGraph: one callback handler, zero code changes.
       </p>
     </section>
 
