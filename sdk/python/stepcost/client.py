@@ -98,8 +98,7 @@ class StepCost:
             name=name,
         )
 
-    @contextmanager
-    def span(
+    def _build_span(
         self,
         *,
         kind: SpanKind,
@@ -107,16 +106,20 @@ class StepCost:
         model: str | None = None,
         provider: Provider | None = None,
         prompt_version: str | None = None,
-    ) -> Iterator[ActiveSpan]:
+        parent_span_id: str | None = None,
+    ) -> Span:
         trace = get_trace()
         trace_id = trace.trace_id if trace else str(uuid4())
-        enclosing = current_span()
-        if enclosing is not None:
-            parent_id = enclosing.span.span_id
-        elif trace and trace.root_span:
-            parent_id = trace.root_span.span_id
+        if parent_span_id is not None:
+            parent_id = parent_span_id
         else:
-            parent_id = None
+            enclosing = current_span()
+            if enclosing is not None:
+                parent_id = enclosing.span.span_id
+            elif trace and trace.root_span:
+                parent_id = trace.root_span.span_id
+            else:
+                parent_id = None
 
         span = Span(
             trace_id=trace_id,
@@ -135,12 +138,54 @@ class StepCost:
             prompt_version=prompt_version,
         )
         self._index_span(span)
+        return span
+
+    @contextmanager
+    def span(
+        self,
+        *,
+        kind: SpanKind,
+        name: str | None = None,
+        model: str | None = None,
+        provider: Provider | None = None,
+        prompt_version: str | None = None,
+    ) -> Iterator[ActiveSpan]:
+        span = self._build_span(
+            kind=kind, name=name, model=model, provider=provider, prompt_version=prompt_version
+        )
         active = ActiveSpan(client=self, span=span)
         active.__enter__()
         try:
             yield active
         finally:
             active.finish()
+
+    def start_span(
+        self,
+        *,
+        kind: SpanKind,
+        name: str | None = None,
+        model: str | None = None,
+        provider: Provider | None = None,
+        prompt_version: str | None = None,
+        parent_span_id: str | None = None,
+    ) -> ActiveSpan:
+        """Begin a span with an explicit parent; caller must call ``.finish()``.
+
+        For event-driven integrations (LangChain callbacks, OTel bridges) whose
+        begin/end pairs don't nest as ``with`` blocks. Unlike ``span()``, the
+        span is NOT pushed onto the contextvar stack — parenting is the
+        caller's explicit run tree, not the ambient one.
+        """
+        span = self._build_span(
+            kind=kind,
+            name=name,
+            model=model,
+            provider=provider,
+            prompt_version=prompt_version,
+            parent_span_id=parent_span_id,
+        )
+        return ActiveSpan(client=self, span=span)
 
     def _init_trace_rollup(self, trace_id: str) -> None:
         with self._lock:

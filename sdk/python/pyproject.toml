@@ -32,9 +32,13 @@ Issues = "https://github.com/bronette/stepcost/issues"
 stepcost = "stepcost.cli:main"
 
 [project.optional-dependencies]
+langchain = [
+    "langchain-core>=0.3",
+]
 dev = [
     "pytest>=8.0",
     "ruff>=0.4",
+    "langchain-core>=0.3",
 ]
 
 [build-system]

@@ -50,6 +50,32 @@ re-queue instead of dropping, and concurrent async agents keep correct
 parent/child cost attribution. For providers without an extractor, call
 `record_usage(input_tokens=..., output_tokens=...)`.
 
+## LangChain / LangGraph (zero lines per call site)
+
+```bash
+pip install "stepcost[langchain]"
+```
+
+```python
+from stepcost import StepCost
+from stepcost.integrations.langchain import StepCostCallbackHandler
+
+cc = StepCost(project="my-app", sink="sqlite:///~/.stepcost/my-app.db")
+handler = StepCostCallbackHandler(cc)
+
+with cc.trace(feature_id="support-bot", customer_id="acme") as trace:
+    agent.invoke(inputs, config={"callbacks": [handler]})
+
+print(trace.total_usd, trace.by_step)
+```
+
+Every chain/graph node becomes a priced `agent_step`, every model call an
+`llm_generation` (cache reads/writes and reasoning tokens unfolded from
+LangChain's aggregated `usage_metadata` — no double-counting), every tool call
+a `tool_call` — parented by LangChain's own run tree, so parallel branches
+attribute correctly. LCEL plumbing (`RunnableSequence` etc.) is filtered out of
+the tree.
+
 ## Privacy
 
 **Metadata-only by default.** Spans capture token counts, model, and your
