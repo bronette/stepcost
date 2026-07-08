@@ -1,6 +1,6 @@
 [project]
 name = "stepcost"
-version = "0.1.0"
+version = "0.2.0"
 description = "FinOps for LLM agents — unit economics and cost accountability in the developer workflow"
 requires-python = ">=3.11"
 readme = "README.md"

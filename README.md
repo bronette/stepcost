@@ -52,31 +52,26 @@ re-queue instead of dropping, and concurrent async agents keep correct
 parent/child cost attribution. For providers without an extractor, call
 `record_usage(input_tokens=..., output_tokens=...)`.
 
-## LangChain / LangGraph (zero lines per call site)
-
-```bash
-pip install "stepcost[langchain]"
-```
+## Integrations (zero lines per call site)
 
 ```python
-from stepcost import StepCost
+# LangChain / LangGraph — one callback handler        pip install "stepcost[langchain]"
 from stepcost.integrations.langchain import StepCostCallbackHandler
+agent.invoke(inputs, config={"callbacks": [StepCostCallbackHandler(cc)]})
 
-cc = StepCost(project="my-app", sink="sqlite:///~/.stepcost/my-app.db")
-handler = StepCostCallbackHandler(cc)
+# LiteLLM — 100+ providers, any language via the proxy
+from stepcost.integrations.litellm import StepCostLiteLLMLogger
+litellm.success_callback = [StepCostLiteLLMLogger(cc).log_success_event]
 
-with cc.trace(feature_id="support-bot", customer_id="acme") as trace:
-    agent.invoke(inputs, config={"callbacks": [handler]})
-
-print(trace.total_usd, trace.by_step)
+# Direct SDK clients — wrap once, every call priced
+from stepcost.integrations.openai import instrument_openai
+from stepcost.integrations.anthropic import instrument_anthropic
+client = instrument_openai(OpenAI(), cc)
+claude = instrument_anthropic(anthropic.Anthropic(), cc)
 ```
 
-Every chain/graph node becomes a priced `agent_step`, every model call an
-`llm_generation` (cache reads/writes and reasoning tokens unfolded from
-LangChain's aggregated `usage_metadata` — no double-counting), every tool call
-a `tool_call` — parented by LangChain's own run tree, so parallel branches
-attribute correctly. LCEL plumbing (`RunnableSequence` etc.) is filtered out of
-the tree.
+All four produce the same typed cost graph and compose inside one trace. Full
+details and the manual API: [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
 
 ## Two-sided ledger: reconcile against what your provider actually bills
 
