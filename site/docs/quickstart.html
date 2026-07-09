@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quickstart — StepCost Docs</title>
+  <meta name="description" content="Install StepCost and see your first priced agent cost graph in five minutes — $0, no API key." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html">Overview</a>
+      <a href="quickstart.html" class="active">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html">Integrations</a>
+      <a href="cli.html">Report CLI &amp; sync</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>Quickstart</h1>
+      <p class="lead">From install to a priced cost graph in five minutes. The demo costs $0
+      and needs no API key.</p>
+
+      <h2>1. Install</h2>
+      <pre><span class="c">pip install stepcost</span>              <span class="o"># Python ≥ 3.11 · one dependency (pydantic)</span>
+<span class="c">pip install "stepcost[langchain]"</span>  <span class="o"># optional: LangChain/LangGraph integration</span></pre>
+
+      <h2>2. Run the demo agent ($0)</h2>
+      <p>The quickstart instruments a three-step agent (plan → retrieve → execute) with
+      simulated token usage — no API calls, no spend:</p>
+      <pre><span class="c">curl -sO https://raw.githubusercontent.com/bronette/stepcost/main/sdk/python/examples/quickstart.py
+python quickstart.py</span>
+<span class="o">trace total: $0.0152
+by step:     {'plan': 0.000288, 'retrieve': 0.00016, 'execute': 0.01475}</span></pre>
+
+      <h2>3. Render the report</h2>
+      <pre><span class="c">stepcost report ~/.stepcost/quickstart.db</span></pre>
+      <p>You get the account summary (by feature, by customer, by kind, top traces, waste flags),
+      and <code>--trace &lt;id&gt;</code> renders the per-run cost tree with per-node tokens and dollars.
+      See <a href="cli.html">Report CLI &amp; sync</a> for the full anatomy.</p>
+
+      <h2>4. Instrument your own agent</h2>
+      <p>Two context managers and one <code>record()</code> call:</p>
+      <pre><span class="o">from stepcost import StepCost, agent_step, llm_call
+
+cc = StepCost(project="my-app", sink="sqlite:///~/.stepcost/my-app.db")
+
+with cc.trace(feature_id="support-bot", customer_id="acme") as trace:
+    with agent_step("answer"):
+        with llm_call(model="gpt-4o-mini", provider="openai") as call:
+            response = openai_client.chat.completions.create(...)
+            call.record(response)   <span class="c"># invoice-safe token + $ extraction</span>
+
+print(trace.total_usd, trace.by_step)</span></pre>
+      <ul>
+        <li><code>trace(...)</code> opens a run and carries your business dimensions
+        (<code>feature_id</code>, <code>customer_id</code>, <code>team_id</code>, ...).</li>
+        <li><code>agent_step("name")</code> marks a logical step — costs of everything inside roll up to it.</li>
+        <li><code>call.record(response)</code> extracts usage from OpenAI (Chat Completions, Responses API,
+        embeddings) and Anthropic response objects. No extractor for your provider? Use
+        <code>call.record_usage(input_tokens=..., output_tokens=...)</code>.</li>
+      </ul>
+      <div class="callout">
+        Already on LangChain, LangGraph, or LiteLLM — or calling the OpenAI/Anthropic SDKs directly?
+        You don't need any of the above: <a href="integrations.html">one callback or wrapper instruments
+        everything</a> with zero code changes per call site.
+      </div>
+
+      <h2>5. Durability, for free</h2>
+      <p>No <code>flush()</code> calls needed: spans persist when each trace exits and again at process
+      exit. Sink failures re-queue instead of dropping. Concurrent asyncio agents under one trace keep
+      correct parent/child attribution.</p>
+
+      <h2>6. Optional: reconcile against your real bill</h2>
+      <p>With an organization admin key, pull what your provider says it will bill into the same
+      database and get drift + coverage on every report:</p>
+      <pre><span class="c">export ANTHROPIC_ADMIN_KEY=sk-ant-admin01-...
+stepcost sync anthropic ~/.stepcost/my-app.db --days 7
+stepcost report ~/.stepcost/my-app.db</span></pre>
+      <p>Details in <a href="cli.html#sync">Report CLI &amp; sync</a>.</p>
+
+      <div class="next">
+        <a href="index.html">← Overview</a>
+        <a href="integrations.html">Integrations →</a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

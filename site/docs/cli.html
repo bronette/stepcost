@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Report CLI &amp; sync — StepCost Docs</title>
+  <meta name="description" content="stepcost report and stepcost sync reference — cost trees, rollups, waste flags, and provider-bill reconciliation." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html">Overview</a>
+      <a href="quickstart.html">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html">Integrations</a>
+      <a href="cli.html" class="active">Report CLI &amp; sync</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>Report CLI &amp; sync</h1>
+      <p class="lead">Everything renders from a local SQLite file — no server, no account.</p>
+
+      <h2>stepcost report</h2>
+      <pre><span class="c">stepcost report &lt;db&gt;</span>                 <span class="o"># account summary across all traces</span>
+<span class="c">stepcost report &lt;db&gt; --trace &lt;id&gt;</span>    <span class="o"># one trace's cost tree (per-node tokens + $)</span>
+<span class="c">stepcost report &lt;db&gt; --top 10</span>        <span class="o"># top-N most expensive traces</span>
+<span class="c">stepcost report &lt;db&gt; --multiplier 30</span> <span class="o"># scale waste $ estimates (e.g. day → month)</span>
+<span class="c">stepcost report &lt;db&gt; --json</span>          <span class="o"># machine-readable (incl. the span tree)</span></pre>
+      <p><code>&lt;db&gt;</code> accepts a plain path or a <code>sqlite:///path</code> URL.</p>
+
+      <h3>Summary anatomy</h3>
+      <ul>
+        <li><strong>By feature / by customer / by kind</strong> — dollar rollups over your business dimensions.</li>
+        <li><strong>Top traces</strong> — the most expensive runs, for drill-down with <code>--trace</code>.</li>
+        <li><strong>Waste signals</strong> — heuristics with estimated $ leaks: <code>missing_cache</code>
+        (repeated large uncached prefixes; accounts for the cache-write premium and never flags traffic
+        that already reads/writes cache), <code>retry_loop</code> (the same step ran 4+ times in one trace),
+        <code>oversized_context</code> (input growing monotonically — full history re-sent), and
+        <code>model_oversized</code> (frontier model producing tiny outputs). Flags, not prescriptions.</li>
+        <li><strong>Unpriced spans</strong> — models with real tokens but no price-table entry. Loud on
+        purpose: a silent $0 undercounts your total.</li>
+        <li><strong>Provider reconciliation</strong> — appears automatically once you've run
+        <code>stepcost sync</code> (below).</li>
+      </ul>
+
+      <h2 id="sync">stepcost sync — the two-sided ledger</h2>
+      <p>Pulls what your provider says it will bill (their organization cost APIs) into the same
+      database, per day per model:</p>
+      <pre><span class="c">export ANTHROPIC_ADMIN_KEY=sk-ant-admin01-...</span>   <span class="o"># Console → Settings → Organization → Admin keys</span>
+<span class="c">stepcost sync anthropic &lt;db&gt; --days 7</span>
+
+<span class="c">export OPENAI_ADMIN_KEY=...</span>                     <span class="o"># platform.openai.com → Settings → Organization</span>
+<span class="c">stepcost sync openai &lt;db&gt; --days 7</span></pre>
+      <p>The next <code>stepcost report</code> gains a reconciliation section:</p>
+      <pre><span class="o">Provider reconciliation (SDK-observed vs provider-billed):
+  anthropic  2026-07-08   SDK $0.0190   billed $0.0190   drift 0.2%   coverage 100%
+  2% gate (worst day): 0.23% — <span class="c">PASS ✅</span></span></pre>
+      <ul>
+        <li><strong>Drift</strong> — |SDK − billed| / billed, per provider-day. This is StepCost's pricing
+        accuracy, audited against the invoice continuously.</li>
+        <li><strong>Coverage</strong> — SDK ÷ billed. Below 100% means spend the SDK never saw:
+        uninstrumented call sites, scripts, or teammates' experiments. No SDK can see this alone —
+        it's the provider ledger that exposes it.</li>
+      </ul>
+      <div class="callout warn">
+        Admin keys are a different key type from regular API keys (Anthropic: <code>sk-ant-admin01-…</code>,
+        organization accounts only). Provider cost data appears with a delay — typically minutes, but new
+        organizations can lag longer. Re-syncs are idempotent per provider-day.
+      </div>
+
+      <h2>Reading the trace view</h2>
+      <pre><span class="c">stepcost report ~/.stepcost/my-app.db --trace 47b3783e</span>
+<span class="o">trace support-bot                           12,480 tok  <span class="hi">$0.0152</span>
+├─ agent_step: plan                            1,380 tok  $0.0003
+│  └─ llm gpt-4o-mini                          1,380 tok  $0.0003
+└─ agent_step: execute                         4,100 tok  <span class="hi">$0.0148</span>
+   └─ llm gpt-4o                               4,100 tok  $0.0148</span></pre>
+      <p>Each node shows subtree tokens and dollars; the most expensive step is where to look first.
+      <code>--json</code> emits the same tree machine-readably for your own tooling.</p>
+
+      <div class="next">
+        <a href="integrations.html">← Integrations</a>
+        <a href="concepts.html">Concepts &amp; pricing →</a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Docs — StepCost</title>
+  <meta name="description" content="StepCost documentation — FinOps for LLM agents. Setup, integrations, CLI reference." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html" class="active">Overview</a>
+      <a href="quickstart.html">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html">Integrations</a>
+      <a href="cli.html">Report CLI &amp; sync</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>StepCost documentation</h1>
+      <p class="lead">FinOps for LLM agents: a priced, typed cost graph for every agent run —
+      by step, by feature, by customer — reconciled against what your provider actually bills.</p>
+
+      <h2>What StepCost is</h2>
+      <p>Your provider bill tells you the total. Your observability tool tells you cost per request.
+      Neither can answer the question that matters for a product: <strong>which step of which agent,
+      serving which feature and which customer, is burning the money?</strong></p>
+      <p>StepCost is an open-source Python SDK that treats agent cost as a first-class typed graph:</p>
+      <pre><span class="o">trace  support-bot / customer=acme                     <span class="hi">$0.0152</span>
+├─ agent_step: plan                                    $0.0003
+│  └─ llm_generation gpt-4o-mini                       $0.0003
+├─ agent_step: retrieve
+│  └─ embedding text-embedding-3-small                 $0.0002
+└─ agent_step: execute
+   └─ llm_generation gpt-4o                            <span class="hi">$0.0148</span></span></pre>
+
+      <h2>The three guarantees</h2>
+      <ul>
+        <li><strong>Invoice-grade pricing.</strong> Cache reads at 0.1x, 5-minute cache writes at 1.25x,
+        1-hour writes at 2x, reasoning tokens split from output — priced the way OpenAI (Chat Completions,
+        Responses API, embeddings) and Anthropic actually bill. A versioned, immutable price table gives
+        finance a point-in-time audit trail.</li>
+        <li><strong>Never a silent $0.</strong> Unrecognized usage shapes raise instead of recording zero.
+        Models missing from the price table warn at runtime and appear as "unpriced spans" in every report.</li>
+        <li><strong>Doesn't lose data.</strong> Spans persist at trace and process exit (no manual flush),
+        sink failures re-queue instead of dropping, and concurrent async agents keep correct parent/child
+        attribution. &lt;5&nbsp;ms p99 span-emit overhead.</li>
+      </ul>
+
+      <h2>The two-sided ledger</h2>
+      <p>The SDK sees <em>why</em> you spent (step, feature, customer). Your provider's billing API knows
+      <em>what you'll pay</em>. <code>stepcost sync</code> pulls the provider side into the same local
+      database, and every report shows <strong>drift</strong> (does StepCost match the invoice?) and
+      <strong>coverage</strong> (how much of the bill did instrumented code account for?). Each side audits
+      the other's blind spot.</p>
+
+      <h2>Privacy &amp; deployment</h2>
+      <p>Metadata-only by default: token counts, models, and your business dimensions —
+      <strong>never prompt or response content</strong>. Fully offline: local SQLite, no account,
+      no cloud. MIT licensed.</p>
+
+      <div class="next">
+        <span></span>
+        <a href="quickstart.html">Quickstart →</a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

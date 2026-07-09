@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Integrations — StepCost Docs</title>
+  <meta name="description" content="Instrument LangChain, LangGraph, LiteLLM, and the OpenAI/Anthropic SDKs with zero code changes per call site." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html">Overview</a>
+      <a href="quickstart.html">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html" class="active">Integrations</a>
+      <a href="cli.html">Report CLI &amp; sync</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>Integrations</h1>
+      <p class="lead">Four ways to get spans flowing, from zero-code to fully manual. All produce
+      the same typed cost graph and compose freely inside one trace.</p>
+
+      <table>
+        <thead><tr><th>Integration</th><th>Code per call site</th><th>Covers</th></tr></thead>
+        <tbody>
+          <tr><td><a href="#langchain">LangChain / LangGraph</a></td><td>0 lines (one callback)</td><td>chains, graphs, tools, retrievers</td></tr>
+          <tr><td><a href="#litellm">LiteLLM</a></td><td>0 lines (one callback)</td><td>100+ providers via SDK or proxy</td></tr>
+          <tr><td><a href="#wrappers">Client wrappers</a></td><td>0 lines (wrap once)</td><td>direct OpenAI / Anthropic SDK use</td></tr>
+          <tr><td><a href="#manual">Manual</a></td><td>2 lines</td><td>anything else</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="langchain">LangChain / LangGraph</h2>
+      <pre><span class="c">pip install "stepcost[langchain]"</span></pre>
+      <pre><span class="o">from stepcost import StepCost
+from stepcost.integrations.langchain import StepCostCallbackHandler
+
+cc = StepCost(project="my-app", sink="sqlite:///~/.stepcost/my-app.db")
+handler = StepCostCallbackHandler(cc)
+
+with cc.trace(feature_id="support-bot", customer_id="acme") as trace:
+    agent.invoke(inputs, config={"callbacks": [handler]})</span></pre>
+      <p>Every chain/graph node becomes an <code>agent_step</code>, model calls become priced
+      <code>llm_generation</code> spans, tools and retrievers are captured. Parenting follows
+      LangChain's own run tree, so <strong>parallel branches attribute correctly</strong>; LCEL
+      plumbing (<code>RunnableSequence</code> etc.) is filtered out of the tree.</p>
+      <div class="callout">
+        LangChain folds cache reads/writes <em>into</em> <code>usage_metadata.input_tokens</code>.
+        The handler unfolds them, so cached tokens are billed at the cache rate — not double-counted
+        at the full input rate.
+      </div>
+
+      <h2 id="litellm">LiteLLM</h2>
+      <p>No extra dependency — LiteLLM accepts plain callables:</p>
+      <pre><span class="o">import litellm
+from stepcost.integrations.litellm import StepCostLiteLLMLogger
+
+logger = StepCostLiteLLMLogger(cc)
+litellm.success_callback = [logger.log_success_event]
+litellm.failure_callback = [logger.log_failure_event]
+
+with cc.trace(feature_id="chat") as trace:
+    litellm.completion(model="claude-haiku-4-5", messages=[...])</span></pre>
+      <p>Handles LiteLLM's normalized usage for both OpenAI-style (cached subset subtraction) and
+      Anthropic-style (cache read/write counters) responses, and records call duration. Because the
+      LiteLLM <em>proxy</em> sees traffic from every language, this is also the cheapest way to cover
+      non-Python services.</p>
+
+      <h2 id="wrappers">OpenAI / Anthropic client wrappers</h2>
+      <p>Wrap the official SDK clients once; every call is priced automatically:</p>
+      <pre><span class="o">from stepcost.integrations.openai import instrument_openai
+from stepcost.integrations.anthropic import instrument_anthropic
+
+openai_client = instrument_openai(OpenAI(), cc)              <span class="c"># chat, responses, embeddings</span>
+claude = instrument_anthropic(anthropic.Anthropic(), cc)     <span class="c"># messages</span>
+
+with cc.trace(feature_id="chat") as trace:
+    openai_client.chat.completions.create(model="gpt-4o-mini", messages=[...])
+    claude.messages.create(model="claude-haiku-4-5", max_tokens=64, messages=[...])</span></pre>
+      <ul>
+        <li>Spans nest under whatever <code>agent_step</code> is open at the call site.</li>
+        <li>Provider errors re-raise untouched but still close the span with an <code>error</code> tag.</li>
+        <li>Streaming responses (no usage object) record <code>usage=unavailable</code> instead of guessing.</li>
+      </ul>
+
+      <h2 id="manual">Manual context managers</h2>
+      <p>For custom providers, tool calls, and retrieval steps:</p>
+      <pre><span class="o">from stepcost import agent_step, llm_call
+
+with cc.trace(feature_id="pipeline") as trace:
+    with agent_step("summarize"):
+        with llm_call(model="my-model", provider="other") as call:
+            resp = my_client.generate(...)
+            call.record_usage(input_tokens=resp.in_toks, output_tokens=resp.out_toks)</span></pre>
+      <p>Unknown models warn loudly and show as "unpriced spans" in <code>stepcost report</code> —
+      add them with <code>register_custom_model()</code> or a custom price table
+      (<a href="concepts.html#pricing">Concepts &amp; pricing</a>).</p>
+
+      <div class="next">
+        <a href="quickstart.html">← Quickstart</a>
+        <a href="cli.html">Report CLI &amp; sync →</a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

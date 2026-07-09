@@ -128,7 +128,7 @@ def check_gate_against_saved_run(billed: Decimal) -> int:
     return 0 if _print_gate(computed, billed) else 2
 
 
-def run_live() -> int:
+def run_live(rounds: int = 1) -> int:
     try:
         import anthropic
     except ImportError:
@@ -142,38 +142,49 @@ def run_live() -> int:
     rows: list[tuple[str, Decimal, str]] = []
 
     with cc.trace(feature_id="haiku_reconcile") as trace:
-        for label, system_kind, prompt in CALLS:
-            if system_kind == "cached":
-                system = [
-                    {"type": "text", "text": _CACHE_PREFIX, "cache_control": {"type": "ephemeral"}}
-                ]
-            elif system_kind == "large":
-                system = _CACHE_PREFIX
-            else:
-                system = _SMALL_SYSTEM
-            with llm_call(model=MODEL, provider=Provider.ANTHROPIC) as call:
-                resp = client.messages.create(
-                    model=MODEL,
-                    max_tokens=16,
-                    system=system,
-                    messages=[{"role": "user", "content": prompt}],
+        for i in range(rounds):
+            for label, system_kind, prompt in CALLS:
+                if system_kind == "cached":
+                    system = [
+                        {
+                            "type": "text",
+                            "text": _CACHE_PREFIX,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ]
+                elif system_kind == "large":
+                    system = _CACHE_PREFIX
+                else:
+                    system = _SMALL_SYSTEM
+                with llm_call(model=MODEL, provider=Provider.ANTHROPIC) as call:
+                    resp = client.messages.create(
+                        model=MODEL,
+                        max_tokens=16,
+                        system=system,
+                        messages=[{"role": "user", "content": prompt}],
+                    )
+                    call.record(resp, provider="anthropic")
+                span_cost = call.span.cost.total_usd if call.span.cost else Decimal("0")
+                u = resp.usage
+                usage_str = (
+                    f"in={u.input_tokens} out={u.output_tokens} "
+                    f"cw={getattr(u, 'cache_creation_input_tokens', 0) or 0} "
+                    f"cr={getattr(u, 'cache_read_input_tokens', 0) or 0}"
                 )
-                call.record(resp, provider="anthropic")
-            span_cost = call.span.cost.total_usd if call.span.cost else Decimal("0")
-            u = resp.usage
-            usage_str = (
-                f"in={u.input_tokens} out={u.output_tokens} "
-                f"cw={getattr(u, 'cache_creation_input_tokens', 0) or 0} "
-                f"cr={getattr(u, 'cache_read_input_tokens', 0) or 0}"
-            )
-            rows.append((label, span_cost, usage_str))
-            total += span_cost
+                rows.append((label, span_cost, usage_str))
+                total += span_cost
+            if rounds > 1 and (i + 1) % 10 == 0:
+                print(f"  ...round {i + 1}/{rounds}, running total ${total:.4f}", flush=True)
 
     cc.flush()
 
-    print("\n=== StepCost computed cost per call ===")
-    for label, cost, usage in rows:
-        print(f"  {label:16} ${cost:.6f}   ({usage})")
+    print("\n=== StepCost computed cost per call (aggregated by label) ===")
+    agg: dict[str, tuple[int, Decimal]] = {}
+    for label, cost, _u in rows:
+        n, c = agg.get(label, (0, Decimal("0")))
+        agg[label] = (n + 1, c + cost)
+    for label, (n, cost) in agg.items():
+        print(f"  {label:16} x{n:<4} ${cost:.6f}")
     print(f"\nStepCost trace total: ${total:.6f}   (trace.total_usd=${trace.total_usd:.6f})")
     _save_run(total, rows)
     print(f"\nRun persisted to {RUN_FILE}.")
@@ -188,6 +199,10 @@ def run_live() -> int:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--live", action="store_true", help="actually call the API (bills real $)")
+    ap.add_argument(
+        "--rounds", type=int, default=1,
+        help="repeat the call set N times (size the run so cents-rounding can't blur the gate)",
+    )
     ap.add_argument(
         "--billed",
         type=Decimal,
@@ -212,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.live:
         _plan()
         return 0
-    return run_live()
+    return run_live(rounds=args.rounds)
 
 
 if __name__ == "__main__":

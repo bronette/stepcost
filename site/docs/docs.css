@@ -1,0 +1,91 @@
+:root {
+  --bg: #0b0f14; --surface: #121820; --border: #243041; --text: #e8eef6;
+  --muted: #8fa3bc; --accent: #3dd68c; --accent-dim: #1a9d5c; --warn: #f5a623;
+  --code-bg: #070a0f;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.65;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+header.top {
+  border-bottom: 1px solid var(--border); padding: .85rem 1.25rem;
+  position: sticky; top: 0; background: rgba(11,15,20,.92);
+  backdrop-filter: blur(8px); z-index: 10;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.logo { font-weight: 700; font-size: 1.1rem; letter-spacing: -.02em; color: var(--text); }
+.logo span { color: var(--accent); }
+.logo em { color: var(--muted); font-style: normal; font-weight: 400; margin-left: .5rem; font-size: .95rem; }
+.top-links { display: flex; gap: 1.1rem; font-size: .92rem; }
+.top-links a { color: var(--muted); }
+.top-links a:hover { color: var(--text); text-decoration: none; }
+
+.layout { display: flex; max-width: 1180px; margin: 0 auto; }
+nav.side {
+  width: 230px; flex-shrink: 0; padding: 2rem 1.25rem 2rem 1.25rem;
+  border-right: 1px solid var(--border); min-height: calc(100vh - 57px);
+  position: sticky; top: 57px; align-self: flex-start;
+}
+nav.side .group { color: var(--muted); font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; margin: 1.4rem 0 .5rem; }
+nav.side .group:first-child { margin-top: 0; }
+nav.side a { display: block; color: var(--muted); font-size: .93rem; padding: .28rem 0; }
+nav.side a:hover { color: var(--text); text-decoration: none; }
+nav.side a.active { color: var(--accent); font-weight: 600; }
+
+main.doc { flex: 1; min-width: 0; padding: 2.5rem 2rem 4rem; max-width: 780px; }
+main.doc h1 { font-size: 2rem; letter-spacing: -.02em; margin-bottom: .5rem; }
+main.doc p.lead { color: var(--muted); font-size: 1.08rem; margin-bottom: 2rem; }
+main.doc h2 { font-size: 1.35rem; letter-spacing: -.01em; margin: 2.4rem 0 .8rem; padding-top: .5rem; }
+main.doc h3 { font-size: 1.05rem; margin: 1.8rem 0 .6rem; }
+main.doc p, main.doc li { color: #c9d6e5; font-size: .96rem; }
+main.doc p { margin-bottom: .9rem; }
+main.doc ul, main.doc ol { margin: 0 0 1rem 1.4rem; }
+main.doc li { margin-bottom: .35rem; }
+main.doc strong { color: var(--text); }
+
+code {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .85em;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 5px; padding: .1em .35em; color: #d7e3f2;
+}
+pre {
+  font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .8rem;
+  line-height: 1.55; padding: 1.1rem 1.2rem; overflow-x: auto; color: #c9d6e5;
+  background: var(--code-bg); border: 1px solid var(--border);
+  border-radius: 10px; margin: 0 0 1.1rem;
+}
+pre code { background: none; border: none; padding: 0; font-size: inherit; }
+pre .c { color: var(--accent); }
+pre .o { color: #9eb4cc; }
+pre .hi { color: var(--warn); }
+
+table { width: 100%; border-collapse: collapse; font-size: .92rem; margin: 0 0 1.2rem; }
+th, td { text-align: left; padding: .55rem .7rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 500; }
+
+.callout {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  background: var(--surface); border-radius: 8px; padding: .85rem 1.1rem;
+  margin: 0 0 1.1rem; font-size: .93rem; color: #c9d6e5;
+}
+.callout.warn { border-left-color: var(--warn); }
+
+.next {
+  display: flex; justify-content: space-between; gap: 1rem;
+  margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border);
+  font-size: .93rem;
+}
+
+@media (max-width: 860px) {
+  .layout { flex-direction: column; }
+  nav.side {
+    width: 100%; min-height: 0; position: static; border-right: none;
+    border-bottom: 1px solid var(--border); padding: 1rem 1.25rem;
+    display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; align-items: baseline;
+  }
+  nav.side .group { margin: 0; width: 100%; }
+}

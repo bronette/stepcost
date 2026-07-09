@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Concepts &amp; pricing — StepCost Docs</title>
+  <meta name="description" content="StepCost's cost model: span kinds, the versioned price table, invoice-grade extraction rules, waste signals, and privacy." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html">Overview</a>
+      <a href="quickstart.html">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html">Integrations</a>
+      <a href="cli.html">Report CLI &amp; sync</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html" class="active">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>Concepts &amp; pricing</h1>
+      <p class="lead">The data model behind the graph, and the rules that make the dollars
+      match your invoice.</p>
+
+      <h2>The span graph</h2>
+      <p>Every run is a <strong>trace</strong>; everything inside is a typed <strong>span</strong>
+      with a parent — that's what makes cost attributable rather than just loggable:</p>
+      <table>
+        <thead><tr><th>Kind</th><th>What it prices</th></tr></thead>
+        <tbody>
+          <tr><td><code>trace</code></td><td>the run itself (carries feature/customer/team/session dims)</td></tr>
+          <tr><td><code>agent_step</code></td><td>a logical step; descendant costs roll up to it (<code>by_step</code>)</td></tr>
+          <tr><td><code>llm_generation</code></td><td>a model call — the usual cost driver</td></tr>
+          <tr><td><code>tool_call</code> / <code>retrieval</code> / <code>embedding</code></td><td>tools, RAG lookups, embedding calls</td></tr>
+          <tr><td><code>cache_read</code> / <code>cache_write</code> / <code>retry</code></td><td>explicit cache/retry accounting when you want it</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="pricing">The versioned price table</h2>
+      <p>Costs are computed from a <strong>versioned, immutable</strong> price table shipped with the
+      SDK (current: OpenAI GPT-5.x/4.x/o-series + embeddings, Anthropic Claude 4.x/5 families, and $0
+      entries for local Ollama models). Every span records the table version it was priced with —
+      a point-in-time audit trail for finance. Provider price change? New table version; history is
+      never silently repriced.</p>
+      <pre><span class="o">from stepcost import register_custom_model
+from stepcost.models import ModelPricing, Provider
+from decimal import Decimal
+
+table = register_custom_model("my-finetune", ModelPricing(
+    provider=Provider.OTHER,
+    input_per_1m=Decimal("1.50"), output_per_1m=Decimal("6.00"),
+))
+cc = StepCost(project="my-app", price_table=table)</span></pre>
+
+      <h2>Invoice-grade extraction rules</h2>
+      <p>Most tools multiply <code>prompt_tokens × input_rate</code> and call it a day. Providers
+      don't bill that way. StepCost's extractors implement the actual billing semantics:</p>
+      <table>
+        <thead><tr><th>Line item</th><th>Rate</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td>Uncached input</td><td>1x input</td><td>cached tokens are <em>subtracted</em> from OpenAI's prompt_tokens (they're a subset)</td></tr>
+          <tr><td>Cache read</td><td>~0.1x input</td><td>OpenAI cached_tokens · Anthropic cache_read_input_tokens</td></tr>
+          <tr><td>Cache write (5m TTL)</td><td>1.25x input</td><td>Anthropic cache_creation, 5-minute TTL</td></tr>
+          <tr><td>Cache write (1h TTL)</td><td>2x input</td><td>tracked separately — collapsing the TTLs undercounts 1h traffic by 37.5%</td></tr>
+          <tr><td>Reasoning</td><td>output rate</td><td>split from visible output (OpenAI o-series/Responses API)</td></tr>
+          <tr><td>Visible output</td><td>1x output</td><td>completion minus reasoning — no double count</td></tr>
+          <tr><td>Embeddings</td><td>per-model</td><td>embeddings responses extract as embedding_tokens</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">
+        <strong>Never a silent $0.</strong> An unrecognized usage shape raises a <code>ValueError</code>
+        instead of extracting zeros. A model missing from the price table logs a warning once and shows
+        as "unpriced spans" in every report. All arithmetic is <code>Decimal</code> end-to-end — no float drift.
+      </div>
+
+      <h2>Waste signals</h2>
+      <p>Heuristic flags over the span graph, each with an estimated dollar leak — deliberately
+      <em>flags, not prescriptions</em>: <code>missing_cache</code>, <code>retry_loop</code>,
+      <code>oversized_context</code>, <code>model_oversized</code>. Estimates are over observed
+      traffic; use <code>--multiplier</code> to project. The missing-cache estimate accounts for the
+      first call's cache-write premium, and traffic already reading <em>or writing</em> cache is never
+      flagged.</p>
+
+      <h2>Drift &amp; coverage</h2>
+      <p>With <a href="cli.html#sync"><code>stepcost sync</code></a>, every report compares the SDK's
+      ledger against the provider's, per day: <strong>drift</strong> audits pricing accuracy
+      (target: ≤2% of the invoice); <strong>coverage</strong> exposes spend the SDK never saw.
+      The provider knows <em>what you'll pay</em>; the SDK knows <em>why</em> — each audits the
+      other's blind spot.</p>
+
+      <h2>Privacy &amp; performance</h2>
+      <ul>
+        <li><strong>Metadata-only by default</strong> (<code>PayloadCapture.NONE</code>): token counts,
+        model names, and your business dimensions. Never prompt or response content.</li>
+        <li><strong>Fully offline:</strong> local SQLite (or stdout) sink; no account, no cloud, no
+        network calls except the ones your agent already makes.</li>
+        <li><strong>&lt;5 ms p99</strong> span-emit overhead (benchmarked at 20k samples; p50 ~25 µs).</li>
+        <li>Spans persist at trace and process exit; sink failures re-queue; async-safe parenting.</li>
+      </ul>
+
+      <div class="next">
+        <a href="cli.html">← Report CLI &amp; sync</a>
+        <span></span>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
