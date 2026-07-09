@@ -17,6 +17,9 @@ Invoice-grade by design: cache reads (0.1x), 5-minute cache writes (1.25x),
 bills them — for OpenAI (Chat Completions, Responses API, embeddings) and
 Anthropic. Unrecognized usage shapes raise instead of silently recording $0,
 and models missing from the price table are flagged loudly in every report.
+**Verified against a real Anthropic invoice: 0.0016% error** on a live
+reconciliation run (July 2026), gated by `stepcost sync` against the org
+cost API.
 
 ## Quick start (5 minutes, $0, no API key)
 
