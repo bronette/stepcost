@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cost-as-Code (beta) — StepCost Docs</title>
+  <meta name="description" content="stepcost diff, .stepcost.toml budgets, and the GitHub Action — LLM cost deltas on every PR, like Infracost for agents." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="docs.css" />
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="/">Step<span>Cost</span><em>docs</em></a>
+    <nav class="top-links">
+      <a href="/">Home</a>
+      <a href="https://pypi.org/project/stepcost/">PyPI</a>
+      <a href="https://github.com/bronette/stepcost">GitHub</a>
+    </nav>
+  </header>
+  <div class="layout">
+    <nav class="side">
+      <div class="group">Getting started</div>
+      <a href="index.html">Overview</a>
+      <a href="quickstart.html">Quickstart</a>
+      <div class="group">Guides</div>
+      <a href="integrations.html">Integrations</a>
+      <a href="cli.html">Report CLI &amp; sync</a>
+      <a href="cost-as-code.html" class="active">Cost-as-Code (beta)</a>
+      <div class="group">Reference</div>
+      <a href="concepts.html">Concepts &amp; pricing</a>
+    </nav>
+    <main class="doc">
+      <h1>Cost-as-Code <span style="font-size:.6em;color:var(--warn)">beta</span></h1>
+      <p class="lead">Infracost for LLM agents: the cost delta of every pull request, posted as a
+      comment — and a budget that can fail the build.</p>
+
+      <h2>The idea</h2>
+      <p>A prompt tweak, an extra tool call, a model swap — agent PRs change your token bill and
+      nobody sees it until the invoice. If your CI already runs an instrumented agent suite
+      (evals, e2e tests, golden traces), you have everything needed to price the change
+      <em>before merge</em>:</p>
+      <ol>
+        <li>Base branch run → <code>base.db</code> (cached per commit)</li>
+        <li>PR branch run → <code>head.db</code></li>
+        <li><code>stepcost diff</code> → delta table + budget verdict</li>
+      </ol>
+
+      <h2>stepcost diff</h2>
+      <pre><span class="c">stepcost diff base.db head.db</span>                          <span class="o"># totals + budget verdict</span>
+<span class="c">stepcost diff base.db head.db --markdown</span>               <span class="o"># PR-comment-ready body</span>
+<span class="c">stepcost diff base.db head.db --budget .stepcost.toml</span>  <span class="o"># exit 3 on violation</span></pre>
+      <p>The markdown output shows total delta, per-feature and per-step tables with direction
+      markers, and the most expensive single trace. Exit codes: <code>0</code> within budget,
+      <code>3</code> budget exceeded, <code>2</code> usage error — script-friendly by design.</p>
+
+      <h2>Budgets — .stepcost.toml</h2>
+      <pre><span class="o">[budget]
+max_total_usd    = 5.00   <span class="c"># absolute ceiling for the head run</span>
+max_trace_usd    = 0.25   <span class="c"># ceiling for any single trace</span>
+max_increase_pct = 20.0   <span class="c"># head may cost at most base × 1.20</span></span></pre>
+      <p>All keys optional; set only the gates you want. Parsed with the standard library —
+      no new dependencies.</p>
+
+      <h2>GitHub Action</h2>
+      <p>The repo doubles as a composite action that installs stepcost, runs the diff, posts (or
+      updates) the PR comment, and optionally fails the build:</p>
+      <pre><span class="o">- name: Restore baseline cost DB
+  uses: actions/cache/restore@v4
+  with: { path: base.db, key: stepcost-base-${{ github.event.pull_request.base.sha }} }
+
+- name: Run instrumented agent suite   <span class="c"># your tests write head.db via a StepCost sink</span>
+  run: pytest tests/agent_suite --stepcost-db head.db
+
+- uses: bronette/stepcost@main
+  with:
+    base-db: base.db
+    head-db: head.db
+    budget: .stepcost.toml
+    fail-on-budget: "true"</span></pre>
+      <p>Needs <code>permissions: pull-requests: write</code> for the comment. The comment is
+      updated in place on subsequent pushes (no comment spam).</p>
+
+      <h2>Local HTML report</h2>
+      <p>Same data, shareable file — great for partner demos and cost reviews:</p>
+      <pre><span class="c">stepcost report ~/.stepcost/my-app.db --html report.html</span></pre>
+      <p>One self-contained dark-theme page: totals, rollups, waste flags, reconciliation, and
+      collapsible trace trees. No external assets, works offline, safe to attach anywhere
+      (metadata only, as always).</p>
+
+      <div class="callout warn">
+        <strong>Beta.</strong> The diff/budget/action surface may change based on design-partner
+        feedback. If you wire it into CI, pin the action to a tag once we cut one — and tell us
+        what's missing: <a href="mailto:kevin.brunette@gmail.com">kevin.brunette@gmail.com</a>.
+      </div>
+
+      <div class="next">
+        <a href="cli.html">← Report CLI &amp; sync</a>
+        <a href="concepts.html">Concepts &amp; pricing →</a>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

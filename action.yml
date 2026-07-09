@@ -1,0 +1,72 @@
+name: "StepCost PR cost report (beta)"
+description: >
+  Post an LLM-agent cost delta as a PR comment and optionally fail the build
+  on budget violations. Compares two StepCost sink databases (base vs head)
+  produced by running your instrumented agent suite.
+branding:
+  icon: "dollar-sign"
+  color: "green"
+
+inputs:
+  base-db:
+    description: "Path to the baseline run DB (e.g. restored from cache/artifact)"
+    required: true
+  head-db:
+    description: "Path to this run's DB"
+    required: true
+  budget:
+    description: "Path to .stepcost.toml with a [budget] table (optional)"
+    required: false
+    default: ""
+  comment:
+    description: "Post/update the PR comment (needs GITHUB_TOKEN with pull-requests: write)"
+    required: false
+    default: "true"
+  fail-on-budget:
+    description: "Fail the step when the budget is exceeded"
+    required: false
+    default: "true"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install stepcost
+      shell: bash
+      run: pip install --quiet stepcost
+
+    - name: Compute cost diff
+      id: diff
+      shell: bash
+      run: |
+        set +e
+        ARGS=""
+        [ -n "${{ inputs.budget }}" ] && ARGS="--budget ${{ inputs.budget }}"
+        stepcost diff "${{ inputs.base-db }}" "${{ inputs.head-db }}" $ARGS --markdown > stepcost-comment.md
+        echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+        cat stepcost-comment.md
+
+    - name: Post PR comment
+      if: inputs.comment == 'true' && github.event_name == 'pull_request'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        # Update the existing StepCost comment if present, else create one.
+        EXISTING=$(gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+          --jq '.[] | select(.body | startswith("## 💸 StepCost report")) | .id' | head -1)
+        if [ -n "$EXISTING" ]; then
+          gh api -X PATCH "repos/${{ github.repository }}/issues/comments/$EXISTING" \
+            -F body=@stepcost-comment.md > /dev/null
+        else
+          gh api "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            -F body=@stepcost-comment.md > /dev/null
+        fi
+
+    - name: Enforce budget
+      if: inputs.fail-on-budget == 'true'
+      shell: bash
+      run: |
+        if [ "${{ steps.diff.outputs.exit_code }}" = "3" ]; then
+          echo "::error::StepCost budget exceeded — see the PR comment for the breakdown."
+          exit 1
+        fi

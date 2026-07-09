@@ -14,6 +14,7 @@ import json
 import sqlite3
 import sys
 from decimal import Decimal
+from pathlib import Path
 
 from stepcost import report as R
 from stepcost.waste import WasteSignal
@@ -141,6 +142,19 @@ def _cmd_report(args: argparse.Namespace) -> int:
     summary = R.build_summary(
         spans, top=args.top, monthly_multiplier=args.multiplier, provider_costs=provider_costs
     )
+    if args.html:
+        from stepcost.report_html import render_html
+
+        grouped = R.group_by_trace(spans)
+        traces = [
+            R.build_trace_report(tid, grouped[tid], monthly_multiplier=args.multiplier)
+            for tid, _usd_ in summary.top_traces
+            if tid in grouped
+        ]
+        out = Path(args.html).expanduser()
+        out.write_text(render_html(summary, traces, source=args.db))
+        print(f"wrote {out}  (open it in a browser)")
+        return 0
     if args.json:
         print(json.dumps(_summary_json(summary), default=str, indent=2))
         return 0
@@ -266,6 +280,30 @@ def _cmd_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_diff(args: argparse.Namespace) -> int:
+    from stepcost.diff import Budget, compute_diff, render_markdown
+
+    budget = None
+    if args.budget:
+        budget_path = Path(args.budget).expanduser()
+        if not budget_path.exists():
+            print(f"error: budget file not found: {budget_path}", file=sys.stderr)
+            return 2
+        budget = Budget.load(budget_path)
+    diff = compute_diff(args.base_db, args.head_db, budget)
+    if args.markdown:
+        print(render_markdown(diff))
+    else:
+        sign = "+" if diff.delta >= 0 else ""
+        print(f"base:  {_usd(diff.base_total)}")
+        print(f"head:  {_usd(diff.head_total)}  ({sign}{_usd(diff.delta)}, "
+              f"{'n/a' if diff.pct == float('inf') else f'{sign}{diff.pct:.1f}%'})")
+        for v in diff.violations:
+            print(f"BUDGET: {v}", file=sys.stderr)
+        print("budget:", "PASS" if diff.passed else "FAIL")
+    return 0 if diff.passed else 3
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="stepcost", description="FinOps for LLM agents")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -278,6 +316,13 @@ def build_parser() -> argparse.ArgumentParser:
     sync_p.add_argument("--days", type=int, default=7, help="how many days back to pull")
     sync_p.set_defaults(func=_cmd_sync)
 
+    dif = sub.add_parser("diff", help="(beta) cost delta between two sink DBs; gate on a budget")
+    dif.add_argument("base_db", help="baseline run DB (e.g. main branch)")
+    dif.add_argument("head_db", help="head run DB (e.g. this PR)")
+    dif.add_argument("--budget", default=None, help="path to .stepcost.toml with a [budget] table")
+    dif.add_argument("--markdown", action="store_true", help="emit a PR-comment-ready markdown body")
+    dif.set_defaults(func=_cmd_diff)
+
     rep = sub.add_parser("report", help="render cost report from a sink DB")
     rep.add_argument("db", help="path or sqlite:/// URL to a StepCost SQLite sink")
     rep.add_argument("--trace", help="render one trace's cost tree", default=None)
@@ -287,6 +332,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="scale waste $ estimates to project beyond observed traffic",
     )
     rep.add_argument("--json", action="store_true", help="machine-readable output")
+    rep.add_argument("--html", metavar="OUT", default=None,
+                     help="write a self-contained HTML report (summary view only)")
     rep.set_defaults(func=_cmd_report)
     return parser
 

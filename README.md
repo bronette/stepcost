@@ -9,7 +9,7 @@
 | Us | Them (Langfuse, Helicone, LiteLLM) |
 |----|-------------------------------------|
 | **Agent economics graph** — typed cost nodes (LLM, tool, RAG, cache, retry) | Flat traces; cost as a dashboard field |
-| **Cost-as-Code** — GitHub PR comments + CI budgets (planned) | Dashboards engineers ignore |
+| **Cost-as-Code** — GitHub PR comments + CI budgets (beta) | Dashboards engineers ignore |
 | **Finance-grade ledger** — versioned price table, point-in-time $ | Debug-time estimates |
 
 Invoice-grade by design: cache reads (0.1x), 5-minute cache writes (1.25x),
@@ -75,6 +75,19 @@ claude = instrument_anthropic(anthropic.Anthropic(), cc)
 
 All four produce the same typed cost graph and compose inside one trace. Full
 details and the manual API: [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md).
+
+## Cost-as-Code (beta): the PR comment that prices your agent changes
+
+```bash
+stepcost diff base.db head.db --budget .stepcost.toml --markdown   # exit 3 over budget
+stepcost report ~/.stepcost/my-app.db --html report.html           # local dashboard file
+```
+
+Run your instrumented agent suite on the base branch and the PR branch, diff
+the two databases, and post the delta as a PR comment — the repo doubles as a
+GitHub Action (`uses: bronette/stepcost@main`). Budgets live in
+`.stepcost.toml` (`max_total_usd`, `max_trace_usd`, `max_increase_pct`).
+Guide: [stepcost.com/docs/cost-as-code.html](https://stepcost.com/docs/cost-as-code.html).
 
 ## Two-sided ledger: reconcile against what your provider actually bills
 
