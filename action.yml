@@ -30,9 +30,9 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Install stepcost
+    - name: Install stepcost (pinned to this action's SHA, not latest PyPI)
       shell: bash
-      run: pip install --quiet stepcost
+      run: pip install --quiet "${{ github.action_path }}/sdk/python"
 
     - name: Compute cost diff
       id: diff

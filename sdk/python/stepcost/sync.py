@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -29,6 +31,7 @@ from pydantic import BaseModel
 _ANTHROPIC_COST_URL = "https://api.anthropic.com/v1/organizations/cost_report"
 _OPENAI_COST_URL = "https://api.openai.com/v1/organization/costs"
 _TIMEOUT = 30
+_RETRIES = 3  # transient 429/5xx/network errors retry with backoff; 4xx fail fast
 
 
 class ProviderCost(BaseModel):
@@ -42,9 +45,21 @@ class ProviderCost(BaseModel):
 
 
 def _get_json(url: str, headers: dict[str, str]) -> dict:
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        return json.loads(resp.read().decode())
+    last: Exception | None = None
+    for attempt in range(_RETRIES):
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (429, 500, 502, 503, 529):
+                raise  # auth/validation errors won't heal on retry
+            last = exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last = exc
+        if attempt < _RETRIES - 1:
+            time.sleep(2**attempt)  # 1s, 2s
+    raise last  # type: ignore[misc]
 
 
 # --------------------------------------------------------------------------- #

@@ -23,9 +23,22 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
-from stepcost.report import group_by_trace, load_spans, rollup_by_attr, rollup_by_step, trace_total
+from stepcost.report import (
+    group_by_trace,
+    load_spans,
+    rollup_by_attr,
+    rollup_by_step,
+    trace_total,
+    unpriced_models,
+)
 
 _ZERO = Decimal("0")
+
+
+def _md_cell(text: str) -> str:
+    """Escape span-derived names for markdown table cells (a public Action
+    must not let `| inject |`-style metadata break or spoof the comment)."""
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
 @dataclass
@@ -52,6 +65,7 @@ class CostDiff:
     by_feature: dict[str, tuple[Decimal, Decimal]]  # name -> (base, head)
     by_step: dict[str, tuple[Decimal, Decimal]]
     max_trace_usd: Decimal
+    unpriced: dict[str, int] = field(default_factory=dict)  # head-run models with $0 spans
     violations: list[str] = field(default_factory=list)
 
     @property
@@ -91,9 +105,18 @@ def compute_diff(base_db: str, head_db: str, budget: Budget | None = None) -> Co
         ),
         by_step=_pair(rollup_by_step(base_spans), rollup_by_step(head_spans)),
         max_trace_usd=max_trace,
+        unpriced=unpriced_models(head_spans),
     )
 
     if budget:
+        if diff.unpriced:
+            # An unpriced model records $0 — a budget verdict on an undercounted
+            # total would be meaningless, so unpriced spans fail the gate.
+            models = ", ".join(sorted(diff.unpriced))
+            diff.violations.append(
+                f"head run has unpriced spans ({models}) — totals undercount; "
+                "add the model(s) to the price table before gating"
+            )
         if budget.max_total_usd is not None and diff.head_total > budget.max_total_usd:
             diff.violations.append(
                 f"total ${diff.head_total:.4f} exceeds max_total_usd ${budget.max_total_usd}"
@@ -138,10 +161,13 @@ def render_markdown(diff: CostDiff) -> str:
         "|---|---:|---:|:--|",
     ]
     for name, (b, h) in sorted(diff.by_feature.items(), key=lambda kv: kv[1][1] - kv[1][0], reverse=True):
-        lines.append(f"| {name} | ${b:.4f} | ${h:.4f} | {_arrow(b, h)} ${h - b:+.4f} |")
+        lines.append(f"| {_md_cell(name)} | ${b:.4f} | ${h:.4f} | {_arrow(b, h)} ${h - b:+.4f} |")
     lines += ["", "| Step | Base | PR | Δ |", "|---|---:|---:|:--|"]
     for name, (b, h) in sorted(diff.by_step.items(), key=lambda kv: kv[1][1] - kv[1][0], reverse=True)[:10]:
-        lines.append(f"| {name} | ${b:.4f} | ${h:.4f} | {_arrow(b, h)} ${h - b:+.4f} |")
+        lines.append(f"| {_md_cell(name)} | ${b:.4f} | ${h:.4f} | {_arrow(b, h)} ${h - b:+.4f} |")
+    if diff.unpriced:
+        models = ", ".join(_md_cell(m) for m in sorted(diff.unpriced))
+        lines += ["", f"⚠️ **Unpriced spans in this run** ({models}) — totals are an undercount."]
     lines += [
         "",
         f"<sub>Most expensive single trace: ${diff.max_trace_usd:.4f} · "

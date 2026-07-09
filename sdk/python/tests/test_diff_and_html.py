@@ -117,3 +117,33 @@ def test_html_report_escapes_user_content(tmp_path: Path, capsys):
     html = out.read_text()
     assert "<script>alert(1)</script>" not in html
     assert "&lt;script&gt;" in html
+
+
+def test_diff_unpriced_spans_fail_the_budget_gate(tmp_path: Path):
+    base = _make_db(tmp_path, "base.db", input_tokens=1_000)
+    head_path = tmp_path / "head.db"
+    cc = StepCost(project="demo", sink=f"sqlite:///{head_path}")
+    with cc.trace(feature_id="chat"):
+        with llm_call(model="totally-unknown-model", provider=Provider.OTHER) as call:
+            call.record_usage(input_tokens=50_000)
+    cc.flush()
+    diff = compute_diff(base, str(head_path), Budget(max_total_usd=Decimal("100")))
+    assert not diff.passed
+    assert any("unpriced" in v for v in diff.violations)
+    assert "totally-unknown-model" in render_markdown(diff)
+    # Without a budget it's surfaced but not a violation
+    assert compute_diff(base, str(head_path)).passed
+
+
+def test_markdown_cells_escape_pipes(tmp_path: Path):
+    base_path = tmp_path / "b.db"
+    cc = StepCost(project="demo", sink=f"sqlite:///{base_path}")
+    with cc.trace(feature_id="x | injected | row"):
+        with agent_step("step|pipe"):
+            with llm_call(model="gpt-4o-mini", provider=Provider.OPENAI) as call:
+                call.record_usage(input_tokens=1_000)
+    cc.flush()
+    diff = compute_diff(str(base_path), str(base_path))
+    md = render_markdown(diff)
+    assert "x \\| injected \\| row" in md
+    assert "step\\|pipe" in md

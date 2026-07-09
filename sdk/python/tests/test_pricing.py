@@ -53,3 +53,15 @@ def test_embedding_model_from_price_table():
 def test_unknown_model_returns_none():
     usage = TokenUsage(input_tokens=100, output_tokens=50)
     assert cost_for_model("not-a-real-model", usage) is None
+
+
+def test_version_string_matches_pyproject():
+    """__version__ must track pyproject — 0.3.0 shipped claiming to be 0.1.0."""
+    import tomllib
+    from pathlib import Path
+
+    import stepcost
+
+    pyproject = Path(__file__).parents[1] / "pyproject.toml"
+    declared = tomllib.loads(pyproject.read_text())["project"]["version"]
+    assert stepcost.__version__ == declared
