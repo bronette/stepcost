@@ -53,8 +53,8 @@
       <ul>
         <li><strong>Invoice-grade pricing.</strong> Cache reads at 0.1x, 5-minute cache writes at 1.25x,
         1-hour writes at 2x, reasoning tokens split from output — priced the way OpenAI (Chat Completions,
-        Responses API, embeddings) and Anthropic actually bill. <strong>Verified against a real
-        Anthropic invoice: 0.0016% error</strong> (live reconciliation, July 2026). A versioned,
+        Responses API, embeddings) and Anthropic actually bill. <strong>Verified on live Anthropic invoices — a 160-call run matched to the
+        microdollar ($0.401618 = $0.401618)</strong>; July 2026. A versioned,
         immutable price table gives finance a point-in-time audit trail.</li>
         <li><strong>Never a silent $0.</strong> Unrecognized usage shapes raise instead of recording zero.
         Models missing from the price table warn at runtime and appear as "unpriced spans" in every report.</li>
