@@ -128,3 +128,24 @@ def test_cli_summary_and_trace(tmp_path, capsys):
 
 def test_cli_missing_db_returns_error(tmp_path, capsys):
     assert main(["report", str(tmp_path / "nope.db")]) == 2
+
+
+def test_zero_dollar_workload_shows_token_rollups(tmp_path, capsys):
+    """Ollama/local runs are $0 — by_step must show tokens, not '(none)'."""
+    from stepcost import StepCost, agent_step, llm_call
+
+    db = tmp_path / "free.db"
+    cc = StepCost(project="demo", sink=f"sqlite:///{db}")
+    with cc.trace(feature_id="local") as trace:
+        with agent_step("reason"):
+            with llm_call(model="qwen3:30b-a3b", provider="ollama") as call:
+                call.record_usage(input_tokens=12_000, output_tokens=900)
+    cc.flush()
+
+    from stepcost.cli import main as cli_main
+
+    assert cli_main(["report", str(db), "--trace", trace.trace_id]) == 0
+    out = capsys.readouterr().out
+    assert "(none)" not in out.split("Waste signals")[0]
+    assert "12,900 tok" in out
+    assert "reason" in out

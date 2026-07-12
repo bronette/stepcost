@@ -65,6 +65,15 @@ def _render_tree(node: R.TreeNode, lines: list[str], prefix: str = "", is_last: 
         _render_tree(child, lines, child_prefix, i == len(node.children) - 1, root=False)
 
 
+def _fmt_rows_or_tokens(usd: dict[str, Decimal], tokens: dict[str, int], indent: str = "  ") -> list[str]:
+    """Dollar rows normally; token rows for $0 workloads (local Ollama etc.),
+    so a free run still shows its real step/kind breakdown."""
+    if any(v > 0 for v in usd.values()) or not tokens:
+        return _fmt_rows(usd)
+    rows = sorted(tokens.items(), key=lambda kv: kv[1], reverse=True)
+    return [f"{indent}{k:<28} {v:,} tok" for k, v in rows]
+
+
 def _render_unpriced(unpriced: dict[str, int]) -> list[str]:
     if not unpriced:
         return []
@@ -127,9 +136,9 @@ def _cmd_report(args: argparse.Namespace) -> int:
             _render_tree(node, tree_lines)
         print("\n".join(tree_lines))
         print("\nBy step:")
-        print("\n".join(_fmt_rows(rep.by_step)))
+        print("\n".join(_fmt_rows_or_tokens(rep.by_step, rep.by_step_tokens)))
         print("\nBy kind:")
-        print("\n".join(_fmt_rows(rep.by_kind)))
+        print("\n".join(_fmt_rows_or_tokens(rep.by_kind, rep.by_kind_tokens)))
         print("\nWaste signals:")
         print("\n".join(_render_waste(rep.waste)))
         for line in _render_unpriced(rep.unpriced):

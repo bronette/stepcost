@@ -119,6 +119,31 @@ def unpriced_models(spans: list[Span]) -> dict[str, int]:
     return out
 
 
+def rollup_tokens_by_kind(spans: list[Span]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for s in spans:
+        if s.kind == SpanKind.TRACE:
+            continue
+        out[s.kind.value] = out.get(s.kind.value, 0) + s.usage.total_tokens
+    return out
+
+
+def rollup_tokens_by_step(spans: list[Span]) -> dict[str, int]:
+    """Token-keyed by_step — a $0 local workload (Ollama) still has a real
+    step breakdown; dollar-keyed rollups alone render it as '(none)'."""
+    by_id = _index(spans)
+    out: dict[str, int] = {}
+    for s in spans:
+        if s.kind in (SpanKind.TRACE, SpanKind.AGENT_STEP):
+            continue
+        if s.usage.total_tokens == 0:
+            continue
+        step = _nearest_agent_step(s, by_id)
+        name = step.name if step and step.name else "(no step)"
+        out[name] = out.get(name, 0) + s.usage.total_tokens
+    return out
+
+
 def rollup_by_attr(spans: list[Span], attr: str) -> dict[str, Decimal]:
     out: dict[str, Decimal] = {}
     for s in spans:
@@ -174,6 +199,8 @@ class TraceReport:
     by_step: dict[str, Decimal]
     waste: list[WasteSignal]
     unpriced: dict[str, int] = field(default_factory=dict)
+    by_step_tokens: dict[str, int] = field(default_factory=dict)
+    by_kind_tokens: dict[str, int] = field(default_factory=dict)
 
 
 def build_trace_report(
@@ -190,6 +217,8 @@ def build_trace_report(
         by_step=rollup_by_step(spans),
         waste=detect_waste(spans, monthly_multiplier=monthly_multiplier),
         unpriced=unpriced_models(spans),
+        by_step_tokens=rollup_tokens_by_step(spans),
+        by_kind_tokens=rollup_tokens_by_kind(spans),
     )
 
 
